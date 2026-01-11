@@ -1,0 +1,55 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  telegramId          BigInt    @unique
+  threadsAccessToken  String?   @db.Text
+  threadsUserId       String?
+  threadsLongLivedToken String? @db.Text
+  tokenExpiresAt      DateTime?
+  syncStartDate       DateTime?
+  isActive            Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  
+  channels            Channel[]
+  processedPosts      ProcessedPost[]
+
+  @@map("users")
+}
+
+model Channel {
+  id        String   @id @default(cuid())
+  channelId String   // Telegram channel ID (e.g., "@channel" or "-1001234567890")
+  ownerId   String
+  addedAt   DateTime @default(now())
+  
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, ownerId])
+  @@map("channels")
+}
+
+model ProcessedPost {
+  id          String   @id @default(cuid())
+  threadsPostId String @unique
+  userId      String
+  channelId   String?
+  postedAt    DateTime @default(now())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([threadsPostId])
+  @@map("processed_posts")
+}
