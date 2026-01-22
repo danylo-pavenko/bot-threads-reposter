@@ -23,10 +23,10 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
-    "@grammyjs/conversations": "^1.2.1",
-    "@grammyjs/nestjs": "^1.0.1",
+    "@grammyjs/conversations": "^2.1.1",
+    "@grammyjs/nestjs": "^0.3.4",
     "@nestjs/bull": "^10.0.1",
-    "@nestjs/common": "^10.0.0",
+    "@nestjs/common": "^11.1.11",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
