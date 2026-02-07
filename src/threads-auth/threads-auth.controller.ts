@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Res, BadRequestException, Logger } from '@nestjs/common';
 import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { ThreadsAuthService } from './threads-auth.service';
-import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('auth/threads')
 export class ThreadsAuthController {
@@ -9,8 +9,13 @@ export class ThreadsAuthController {
 
   constructor(
     private threadsAuthService: ThreadsAuthService,
-    private prisma: PrismaService,
+    private configService: ConfigService,
   ) {}
+
+  private getBotStartUrl(params: string): string {
+    const botUsername = this.configService.get<string>('TELEGRAM_BOT_USERNAME') || 'your_bot_username';
+    return `https://t.me/${botUsername}?start=${params}`;
+  }
 
   @Get('callback')
   async callback(
@@ -19,7 +24,7 @@ export class ThreadsAuthController {
     @Res() res: Response,
   ) {
     if (!code) {
-      return res.redirect(`https://t.me/your_bot_username?start=auth_error`);
+      return res.redirect(this.getBotStartUrl('auth_error'));
     }
 
     try {
@@ -51,15 +56,10 @@ export class ThreadsAuthController {
       );
 
       this.logger.log(`User ${telegramId} successfully authenticated with Threads`);
-
-      // Redirect back to Telegram bot
-      // Note: Replace 'your_bot_username' with your actual bot username or use env variable
-      const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'your_bot_username';
-      return res.redirect(`https://t.me/${botUsername}?start=auth_success`);
+      return res.redirect(this.getBotStartUrl('auth_success'));
     } catch (error) {
       this.logger.error(`Authentication error: ${error.message}`, error.stack);
-      const botUsername = process.env.TELEGRAM_BOT_USERNAME || 'your_bot_username';
-      return res.redirect(`https://t.me/${botUsername}?start=auth_error`);
+      return res.redirect(this.getBotStartUrl('auth_error'));
     }
   }
 

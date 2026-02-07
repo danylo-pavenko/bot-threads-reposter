@@ -5,7 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ThreadsAuthModule } from './threads-auth/threads-auth.module';
 import { TelegramBotModule } from './telegram-bot/telegram-bot.module';
 import { PollingModule } from './polling/polling.module';
-import { BullModule } from '@nestjs/bull';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -14,16 +14,8 @@ import { BullModule } from '@nestjs/bull';
       envFilePath: '.env',
     }),
     ScheduleModule.forRoot(),
-    BullModule.forRootAsync({
-      useFactory: () => ({
-        redis: {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT || '6379'),
-          password: process.env.REDIS_PASSWORD || undefined,
-        },
-      }),
-    }),
     PrismaModule,
+    HealthModule,
     ThreadsAuthModule,
     TelegramBotModule,
     PollingModule,

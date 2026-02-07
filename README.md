@@ -1,250 +1,202 @@
-# Threads-to-Telegram Reposter Bot
+# Threads → Telegram Reposter
 
-A NestJS service that automatically syncs Threads posts to Telegram channels using the Threads API and GrammyJS.
+**Repost your Threads posts to your Telegram channel automatically.**
 
-## Features
+- Connect your Threads account once (OAuth).
+- Set a “sync from” date (e.g. only new posts from today).
+- Add the bot as an **admin** to your Telegram channel.
+- New Threads posts are reposted to that channel about every minute (text, images, videos, carousels).
 
-- 🔐 OAuth2 authentication with Threads API
-- 📅 Configurable sync start date
-- 🔄 Automatic polling every 60 seconds
-- 📢 Multi-channel support
-- 🎨 Supports images and videos
-- 💾 PostgreSQL database with Prisma ORM
-- ⚡ Redis for caching and task queues
-- 🚀 Production-ready deployment scripts
+---
 
-## Tech Stack
+## What you need
 
-- **Framework:** NestJS
-- **Bot Library:** GrammyJS (`@grammyjs/nestjs`, `@grammyjs/conversations`)
-- **Database:** PostgreSQL + Prisma
-- **Cache/Queue:** Redis + BullMQ
-- **Process Manager:** PM2
-- **Web Server:** Nginx
+| Item | Where to get it |
+|------|------------------|
+| **Telegram Bot** | [@BotFather](https://t.me/botfather) → `/newbot` → copy token and username |
+| **Threads App** | [Meta for Developers](https://developers.facebook.com) → create app → add **Threads API** → get App ID & Secret, set redirect URI |
+| **Server** | Any host that can run Node.js and reach the internet (e.g. Ubuntu with Docker) |
 
-## Prerequisites
+---
 
-- Node.js 18+ and npm
-- Docker and Docker Compose
-- PostgreSQL (via Docker)
-- Redis (via Docker)
-- Telegram Bot Token (from [@BotFather](https://t.me/botfather))
-- Threads API App ID and Secret (from [Meta for Developers](https://developers.facebook.com))
+## Quick start (local)
 
-## Quick Start
-
-### 1. Clone and Install
+### 1. Clone and install
 
 ```bash
-git clone <repository-url>
+git clone <this-repo>
 cd bot-threads-reposter
 npm install
 ```
 
-### 2. Setup Infrastructure
+### 2. Database and Redis (Docker)
 
 ```bash
-# Run infrastructure setup (installs Docker, starts containers)
-sudo ./setup-infra.sh
-
-# Or manually start containers
 docker compose up -d
 ```
 
-### 3. Configure Environment
+### 3. Environment
 
 ```bash
 cp env.example .env
-# Edit .env with your configuration
 ```
 
-Required environment variables:
+Edit `.env` and set at least:
 
-```env
-# Database
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/threads_reposter?schema=public"
+- `DATABASE_URL` – PostgreSQL URL (default in env.example matches docker-compose).
+- `TELEGRAM_BOT_TOKEN` – from BotFather.
+- `TELEGRAM_BOT_USERNAME` – bot username without `@` (e.g. `MyThreadsReposterBot`).
+- `BASE_URL` – public URL of this app (e.g. `https://reposter.pavenko.com` for production, or `http://localhost:3000` for local + ngrok).
+- `THREADS_APP_ID` and `THREADS_APP_SECRET` – from Meta app.
+- `THREADS_REDIRECT_URI` – must be `{BASE_URL}/auth/threads/callback`.
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# Server
-PORT=3000
-BASE_URL=https://reposter.pavenko.com
-
-# Threads API (Meta)
-THREADS_APP_ID=1508003770281677
-THREADS_APP_SECRET=your_threads_app_secret_here
-THREADS_REDIRECT_URI=https://reposter.pavenko.com/auth/threads/callback
-
-# Telegram Bot
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-```
-
-### 4. Database Setup
+### 4. Database migrations
 
 ```bash
-# Generate Prisma client
 npx prisma generate
-
-# Run migrations
 npx prisma migrate dev
 ```
 
-### 5. Development
+### 5. Run
 
 ```bash
-# Start in development mode
 npm run start:dev
 ```
 
-### 6. Production Deployment
+For production:
 
 ```bash
-# Build the project
 npm run build
-
-# Start with PM2
-pm2 start ecosystem.config.js
-
-# Or use deployment script
-./deploy.sh
+npm run start:prod
+# or: pm2 start ecosystem.config.js
 ```
 
-## Configuration
+---
 
-### Threads API Setup
+## Threads API setup (Meta)
 
-1. Go to [Meta for Developers](https://developers.facebook.com)
-2. Create a new app
-3. Add the Threads API product
-4. Configure OAuth redirect URI: `https://reposter.pavenko.com/auth/threads/callback`
-5. Get your App ID and App Secret
-6. Add to `.env` file
+1. Go to [Meta for Developers](https://developers.facebook.com) and create an app (or use existing).
+2. Add the **Threads API** product to the app.
+3. In **Threads API → Settings** (or App settings):
+   - Set **Valid OAuth Redirect URIs** to: `https://YOUR_DOMAIN/auth/threads/callback` (must match `THREADS_REDIRECT_URI`).
+   - Note your **App ID** and **App Secret** → use in `.env` as `THREADS_APP_ID` and `THREADS_APP_SECRET`.
+4. For production, request **threads_basic** (and **threads_content_publish** if you plan to create posts). For “repost my posts to Telegram” you mainly need **threads_basic**.
 
-### Telegram Bot Setup
+---
 
-1. Contact [@BotFather](https://t.me/botfather) on Telegram
-2. Create a new bot: `/newbot`
-3. Get your bot token
-4. Add to `.env` file
-5. Add the bot as an administrator to your Telegram channels
+## How to use (in Telegram)
 
-## Usage
+1. **Start the bot**  
+   Send `/start` to the bot in a private chat.
 
-### For Users
+2. **Connect Threads**  
+   Send `/auth`. Open the link, log in with Threads, and allow the app. You’ll be redirected back to Telegram.
 
-1. Start the bot: `/start` in Telegram
-2. Authenticate: `/auth` (opens Threads OAuth)
-3. Set sync date: `/setsyncdate` (format: YYYY-MM-DD)
-4. Add bot to channels: Add the bot as an admin to your Telegram channels
-5. Wait for posts to sync automatically
+3. **Set sync date**  
+   Send `/setsyncdate` and enter a date in **YYYY-MM-DD** (e.g. `2024-01-01`). Only posts on or after this date will be reposted.
 
-### Bot Commands
+4. **Add bot to your channel**  
+   In your Telegram channel:  
+   **Channel → Administrators → Add Administrator** → choose your bot and give it permission to post (e.g. “Post messages”).  
+   The bot will register this channel and start reposting your Threads posts there.
 
-- `/start` - Start the bot and check status
-- `/auth` - Authenticate with Threads API
-- `/setsyncdate` - Set the sync start date
-- `/status` - Check your current configuration
+5. **Check status**  
+   Send `/status` to see connected channels and sync date.  
+   Send `/help` for a short reminder of commands.
 
-## Project Structure
+---
+
+## Bot commands
+
+| Command | Description |
+|--------|-------------|
+| `/start` | Show status and next steps |
+| `/auth` | Link your Threads account (opens browser) |
+| `/setsyncdate` | Set “sync from” date (YYYY-MM-DD) |
+| `/status` | Show sync date and list of channels |
+| `/help` | Short help and setup steps |
+
+---
+
+## How it works
+
+- The app runs a **cron job every 60 seconds**.
+- For each user who has linked Threads, set a sync date, and added the bot to at least one channel, it:
+  - Calls the Threads API (`/me/threads`) with the user’s long-lived token.
+  - Filters posts by your “sync from” date and skips already processed posts.
+  - Sends new posts (text + media) to every channel where the bot is admin for that user.
+- Processed post IDs are stored so each post is reposted only once.
+
+---
+
+## Project structure
 
 ```
-bot-threads-reposter/
-├── src/
-│   ├── main.ts                 # Application entry point
-│   ├── app.module.ts           # Root module
-│   ├── prisma/                 # Prisma service and module
-│   ├── redis/                  # Redis service
-│   ├── threads-auth/           # Threads OAuth2 authentication
-│   ├── telegram-bot/           # Telegram bot handlers
-│   │   └── conversations/      # Bot conversations
-│   └── polling/                # Polling service (cron jobs)
-├── prisma/
-│   └── schema.prisma           # Database schema
-├── docker-compose.yml          # Docker services
-├── ecosystem.config.js         # PM2 configuration
-├── nginx.conf                  # Nginx configuration
-├── deploy.sh                   # Deployment script
-└── infra-deploy.sh             # Infrastructure setup script
+src/
+├── main.ts                 # Entry point
+├── app.module.ts           # Root module
+├── health/                 # GET /health for monitoring
+├── prisma/                 # Database client
+├── threads-auth/           # Threads OAuth (authorize + callback)
+├── telegram-bot/           # Bot commands + channel admin detection
+│   └── conversations/      # /setsyncdate flow
+└── polling/                # Cron: fetch Threads → send to Telegram
 ```
 
-## Database Schema
+---
 
-- **User**: Stores Telegram user data, Threads tokens, and sync configuration
-- **Channel**: Stores Telegram channels where the bot is admin
-- **ProcessedPost**: Tracks which Threads posts have been synced
+## Environment variables (reference)
 
-## API Endpoints
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `TELEGRAM_BOT_TOKEN` | Yes | From @BotFather |
+| `TELEGRAM_BOT_USERNAME` | Yes | Bot username (no @) for OAuth redirect |
+| `BASE_URL` | Yes | Public URL of this app (e.g. https://reposter.pavenko.com) |
+| `THREADS_APP_ID` | Yes | Meta app ID |
+| `THREADS_APP_SECRET` | Yes | Meta app secret |
+| `THREADS_REDIRECT_URI` | Yes | Must be `{BASE_URL}/auth/threads/callback` |
+| `PORT` | No | Default 3000 |
+| `REDIS_HOST`, `REDIS_PORT` | No | Not used by default (cron only); optional for future queue |
 
-- `GET /auth/threads/authorize?telegramId=<id>` - Initiate OAuth flow
-- `GET /auth/threads/callback` - OAuth callback handler
+---
 
-## Deployment
+## Deployment (Ubuntu / server)
 
-### Server Setup
+- **Infrastructure (Docker):**  
+  `./setup-infra.sh` or `./infra-deploy.sh` (see scripts for Docker + UFW).
 
-1. **Infrastructure Deployment:**
-   ```bash
-   sudo ./infra-deploy.sh
-   ```
+- **App:**  
+  Set `.env` on the server, then:
 
-2. **Application Deployment:**
-   ```bash
-   ./deploy.sh
-   ```
-
-3. **Nginx Configuration:**
-   ```bash
-   sudo cp nginx.conf /etc/nginx/sites-available/reposter.pavenko.com
-   sudo ln -s /etc/nginx/sites-available/reposter.pavenko.com /etc/nginx/sites-enabled/
-   sudo nginx -t
-   sudo systemctl reload nginx
-   ```
-
-4. **SSL Certificate (Let's Encrypt):**
-   ```bash
-   sudo apt-get install certbot python3-certbot-nginx
-   sudo certbot --nginx -d reposter.pavenko.com
-   ```
-
-## Monitoring
-
-- **PM2 Status:**
   ```bash
-  pm2 status
-  pm2 logs threads-reposter
+  npm ci
+  npx prisma generate
+  npx prisma migrate deploy
+  npm run build
+  pm2 start ecosystem.config.js
   ```
 
-- **Database:**
-  ```bash
-  npx prisma studio
-  ```
+  Or use the provided `deploy.sh` (pull, install, migrate, build, PM2 reload).
 
-- **Docker Containers:**
-  ```bash
-  docker ps
-  docker logs threads-reposter-postgres
-  docker logs threads-reposter-redis
-  ```
+- **Nginx:**  
+  Use `nginx.conf` as a template: proxy `https://reposter.pavenko.com` to `http://localhost:3000`, and add SSL (e.g. Let’s Encrypt).
+
+- **Health check:**  
+  `GET https://your-domain/health` returns `{ "status": "ok", ... }`.
+
+---
 
 ## Troubleshooting
 
-### Bot not responding
-- Check if the bot token is correct in `.env`
-- Verify the bot is running: `pm2 status`
-- Check logs: `pm2 logs threads-reposter`
+| Problem | What to check |
+|--------|----------------|
+| Bot doesn’t reply | `TELEGRAM_BOT_TOKEN` correct? Process running? `pm2 logs` or console. |
+| “Authentication failed” after Threads login | `THREADS_REDIRECT_URI` exactly matches Meta app; `BASE_URL` and `TELEGRAM_BOT_USERNAME` set; no typos in `.env`. |
+| Posts not reposting | User did `/auth`, `/setsyncdate`, and added bot as **admin** to the channel? Token might be expired (re-auth with `/auth`). Check app logs for Threads API errors. |
+| Bot can’t post to channel | Bot must be channel **administrator** with “Post messages” (and “Edit messages” if you use that). |
 
-### OAuth not working
-- Verify redirect URI matches Threads API configuration
-- Check BASE_URL in `.env`
-- Check server logs for errors
-
-### Posts not syncing
-- Verify user has set sync start date
-- Check if bot is admin in channels
-- Verify Threads token is not expired
-- Check polling service logs
+---
 
 ## License
 

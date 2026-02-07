@@ -3,15 +3,23 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramBotService } from '../telegram-bot/telegram-bot.service';
 
+// Threads API: media_type is TEXT_POST | IMAGE | VIDEO | CAROUSEL_ALBUM | AUDIO | REPOST_FACADE
+// Text content is in "text" field (not caption)
 interface ThreadsPost {
   id: string;
-  caption?: string;
+  text?: string;
   media_type?: string;
   media_url?: string;
   thumbnail_url?: string;
   timestamp: string;
+  permalink?: string;
   children?: {
-    data: ThreadsPost[];
+    data: Array<{
+      id: string;
+      media_type?: string;
+      media_url?: string;
+      thumbnail_url?: string;
+    }>;
   };
 }
 
@@ -66,17 +74,15 @@ export class PollingService {
 
   private async processUserPosts(user: any) {
     const accessToken = user.threadsLongLivedToken;
-    const userId = user.threadsUserId;
     const syncStartDate = user.syncStartDate;
     const processedPostIds = new Set(user.processedPosts.map((p: any) => p.threadsPostId));
 
-    if (!accessToken || !userId) {
+    if (!accessToken || !syncStartDate) {
       return;
     }
 
     try {
-      // Fetch user's threads posts
-      const posts = await this.fetchUserThreads(userId, accessToken);
+      const posts = await this.fetchUserThreads(accessToken, syncStartDate);
 
       for (const post of posts) {
         const postId = post.id;
@@ -100,8 +106,26 @@ export class PollingService {
     }
   }
 
-  private async fetchUserThreads(userId: string, accessToken: string): Promise<ThreadsPost[]> {
-    const url = `https://graph.threads.net/v1.0/${userId}/threads?access_token=${accessToken}&fields=id,caption,media_type,media_url,thumbnail_url,timestamp,children{id,media_type,media_url,thumbnail_url}`;
+  /**
+   * Fetches threads for the token owner using GET /me/threads.
+   * Uses since to only get posts from syncStartDate onward.
+   */
+  private async fetchUserThreads(
+    accessToken: string,
+    sinceDate: Date,
+  ): Promise<ThreadsPost[]> {
+    const since = sinceDate.toISOString().split('T')[0]; // YYYY-MM-DD
+    const fields = [
+      'id',
+      'text',
+      'media_type',
+      'media_url',
+      'thumbnail_url',
+      'timestamp',
+      'permalink',
+      'children{id,media_type,media_url,thumbnail_url}',
+    ].join(',');
+    const url = `https://graph.threads.net/v1.0/me/threads?access_token=${encodeURIComponent(accessToken)}&fields=${encodeURIComponent(fields)}&since=${since}&limit=25`;
 
     const response = await fetch(url);
 
@@ -111,40 +135,42 @@ export class PollingService {
     }
 
     const data = await response.json();
-    return data.data || [];
+    const posts: ThreadsPost[] = data.data || [];
+
+    // Sort by timestamp ascending so we repost in chronological order
+    posts.sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+    );
+    return posts;
   }
 
   private async processPost(user: any, post: ThreadsPost) {
     try {
-      const caption = post.caption || '';
+      const caption = post.text || '';
       const media: ThreadsMedia[] = [];
 
-      // Handle main post media
+      // Threads media_type: TEXT_POST, IMAGE, VIDEO, CAROUSEL_ALBUM, AUDIO, REPOST_FACADE
+      const isVideo = (t?: string) => t === 'VIDEO';
+      const isPhoto = (t?: string) => !t || ['TEXT_POST', 'IMAGE', 'CAROUSEL_ALBUM', 'AUDIO', 'REPOST_FACADE'].includes(t);
+
       if (post.media_url) {
         media.push({
-          type: post.media_type === 'VIDEO' ? 'video' : 'photo',
+          type: isVideo(post.media_type) ? 'video' : 'photo',
           media: post.media_url,
         });
       } else if (post.thumbnail_url) {
-        media.push({
-          type: 'photo',
-          media: post.thumbnail_url,
-        });
+        media.push({ type: 'photo', media: post.thumbnail_url });
       }
 
-      // Handle children (carousel posts)
-      if (post.children && post.children.data) {
+      if (post.children?.data) {
         for (const child of post.children.data) {
           if (child.media_url) {
             media.push({
-              type: child.media_type === 'VIDEO' ? 'video' : 'photo',
+              type: isVideo(child.media_type) ? 'video' : 'photo',
               media: child.media_url,
             });
           } else if (child.thumbnail_url) {
-            media.push({
-              type: 'photo',
-              media: child.thumbnail_url,
-            });
+            media.push({ type: 'photo', media: child.thumbnail_url });
           }
         }
       }

@@ -50,53 +50,78 @@ export class TelegramBotService implements OnModuleInit {
     // Handle /start command
     this.bot.command('start', async (ctx: Context) => {
       const telegramId = BigInt(ctx.from.id);
-      const startParam = ctx.match as string;
+      const startParam = (ctx.match as string)?.trim() || '';
+
+      // Ensure user record exists (so adding bot to channel later can link to this user)
+      await this.prisma.user.upsert({
+        where: { telegramId },
+        update: {},
+        create: { telegramId },
+      });
 
       // Handle auth callbacks
       if (startParam === 'auth_success') {
         await ctx.reply(
           '✅ Successfully authenticated with Threads!\n\n' +
-            'Now, let\'s set your sync start date. Use /setsyncdate to configure when to start syncing posts.',
+            'Next: set your sync start date with /setsyncdate (e.g. 2024-01-01), then add this bot as an admin to your Telegram channel. New Threads posts will be reposted there automatically.',
         );
         return;
       }
 
       if (startParam === 'auth_error') {
         await ctx.reply(
-          '❌ Authentication failed. Please try again using /auth command.',
+          '❌ Authentication failed. Please try again with /auth.',
         );
         return;
       }
 
-      // Check if user exists and is authenticated
       const user = await this.threadsAuthService.getUserByTelegramId(telegramId);
 
       if (!user || !user.threadsLongLivedToken) {
         await ctx.reply(
-          '👋 Welcome to Threads-to-Telegram Reposter!\n\n' +
-            'To get started, you need to authenticate with Threads.\n\n' +
-            'Use /auth to begin the authentication process.',
+          '👋 Welcome! This bot reposts your Threads posts to your Telegram channel.\n\n' +
+            '1️⃣ Use /auth to connect your Threads account.\n' +
+            '2️⃣ Use /setsyncdate to set from which date to sync (YYYY-MM-DD).\n' +
+            '3️⃣ Add this bot as an admin to your Telegram channel.\n\n' +
+            'Start with /auth.',
         );
         return;
       }
 
       if (!user.syncStartDate) {
         await ctx.reply(
-          '✅ You\'re authenticated with Threads!\n\n' +
-            'Next step: Set your sync start date to specify when to start syncing posts.\n\n' +
-            'Use /setsyncdate to configure this.',
+          '✅ Threads connected.\n\n' +
+            'Set sync start date with /setsyncdate (e.g. 2024-01-01), then add this bot as an admin to your Telegram channel.',
         );
         return;
       }
 
+      const channelCount = await this.prisma.channel.count({ where: { ownerId: user.id } });
       await ctx.reply(
-        '✅ You\'re all set up!\n\n' +
-          `Sync Start Date: ${user.syncStartDate.toISOString().split('T')[0]}\n` +
-          `Status: ${user.isActive ? '🟢 Active' : '🔴 Inactive'}\n\n` +
-          'Available commands:\n' +
-          '/setsyncdate - Update sync start date\n' +
-          '/status - Check your current status\n' +
-          '/auth - Re-authenticate with Threads',
+        '✅ You\'re set up.\n\n' +
+          `📅 Sync from: ${user.syncStartDate.toISOString().split('T')[0]}\n` +
+          `📢 Channels: ${channelCount}\n\n` +
+          'Commands: /help | /status | /setsyncdate | /auth',
+      );
+    });
+
+    // Help command
+    this.bot.command('help', async (ctx: Context) => {
+      await ctx.reply(
+        '📖 **Threads → Telegram Reposter**\n\n' +
+          'Reposts your Threads posts to Telegram channels where this bot is admin.\n\n' +
+          '**Commands:**\n' +
+          '/start – Check status\n' +
+          '/auth – Connect Threads account\n' +
+          '/setsyncdate – Set date to sync from (YYYY-MM-DD)\n' +
+          '/status – View config & channels\n' +
+          '/help – This message\n\n' +
+          '**Setup:**\n' +
+          '1. /auth and open the link to connect Threads\n' +
+          '2. /setsyncdate and enter a date\n' +
+          '3. Add this bot as admin to your channel\n' +
+          '4. New posts are reposted every minute.',
+        { parse_mode: 'Markdown' },
       );
     });
 
@@ -160,14 +185,23 @@ export class TelegramBotService implements OnModuleInit {
       // Check if bot was added as administrator
       if (newStatus === 'administrator' && oldStatus !== 'administrator') {
         const telegramId = BigInt(ctx.from.id);
-        const user = await this.threadsAuthService.getUserByTelegramId(telegramId);
+
+        // Ensure user exists (they may have added bot to channel before /start)
+        let user = await this.threadsAuthService.getUserByTelegramId(telegramId);
+        if (!user) {
+          await this.prisma.user.upsert({
+            where: { telegramId },
+            update: {},
+            create: { telegramId },
+          });
+          user = await this.threadsAuthService.getUserByTelegramId(telegramId);
+        }
 
         if (!user) {
-          await ctx.reply('❌ You are not registered. Use /start to get started.');
+          await ctx.reply('❌ Something went wrong. Try /start first.');
           return;
         }
 
-        // Store channel information
         const channelId = chat.type === 'channel' ? String(chat.id) : chat.username ? `@${chat.username}` : String(chat.id);
 
         try {
@@ -219,6 +253,15 @@ export class TelegramBotService implements OnModuleInit {
     });
   }
 
+  /** Escape text for Telegram HTML parse_mode so < > & don't break the message */
+  private escapeHtml(text: string): string {
+    if (!text) return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   async sendToChannels(telegramId: bigint, message: string, media?: Array<{ type: 'photo' | 'video'; media: string }>) {
     const user = await this.threadsAuthService.getUserByTelegramId(telegramId);
     if (!user) return;
@@ -227,20 +270,21 @@ export class TelegramBotService implements OnModuleInit {
       where: { ownerId: user.id },
     });
 
+    const safeCaption = this.escapeHtml(message);
+
     for (const channel of channels) {
       try {
         if (media && media.length > 0) {
-          // Format media for Telegram API
           const telegramMedia = media.map((m, index) => ({
             type: m.type,
             media: m.media,
-            caption: index === 0 ? message : undefined, // Only first media gets caption
-            parse_mode: index === 0 ? 'HTML' as const : undefined,
+            caption: index === 0 ? safeCaption : undefined,
+            parse_mode: index === 0 ? ('HTML' as const) : undefined,
           }));
 
           await this.bot.api.sendMediaGroup(channel.channelId, telegramMedia);
         } else {
-          await this.bot.api.sendMessage(channel.channelId, message, {
+          await this.bot.api.sendMessage(channel.channelId, safeCaption || '(no text)', {
             parse_mode: 'HTML',
           });
         }
